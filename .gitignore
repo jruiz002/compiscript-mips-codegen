@@ -1,0 +1,65 @@
+# ============================================================
+# Compiscript — .gitignore del monorepo (Fases 1, 2 y 3)
+# ============================================================
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# --- Entornos virtuales (cada fase tiene el suyo) ---
+venv/
+.venv/
+env/
+ENV/
+.python-version
+
+# --- Testing / cobertura / linters ---
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.mypy_cache/
+.ruff_cache/
+
+# --- Variables de entorno / secretos ---
+.env
+.env.*
+!.env.example
+.streamlit/secrets.toml
+
+# --- Editores / IDEs ---
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# --- Sistema operativo ---
+.DS_Store
+Thumbs.db
+
+# --- Logs ---
+*.log
+
+# --- Salidas locales de compilación (no las esperadas en tests/cases) ---
+*.tac.out
+/scratch/
+
+# --- Fase 3 (mips-codegen) ---
+# Simulador MIPS descargado localmente (MARS/SPIM): binario de terceros, no se versiona.
+mips-codegen/tools/mars/
+mips-codegen/tools/*.jar
+# Salidas locales del compilador. Los .s esperados viven en tests/cases/ y SÍ se versionan.
+mips-codegen/out/
+mips-codegen/**/*.s.out
+mips-codegen/**/*.asm.out
+
+# --- Documentación Antigravity ---
+CLAUDE.md
+FEATURES.md
