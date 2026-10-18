@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mipscodegen"
+version = "0.1.0"
+description = "Compiscript — Fase 3: generacion de codigo MIPS a partir del TAC"
+requires-python = ">=3.10"
+dependencies = [
+    "antlr4-python3-runtime==4.13.2",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0"]
+ide = ["streamlit>=1.35", "streamlit-ace>=0.1.1"]
+
+[project.scripts]
+mipscodegen = "mipscodegen.main:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "simulator: requiere un simulador MIPS (MARS) y Java; se omite si no estan disponibles",
+]
