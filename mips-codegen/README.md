@@ -4,7 +4,7 @@ Traduce **Compiscript** (subset de TypeScript) a assembler **MIPS32**, pasando p
 Tres Direcciones (TAC) de la Fase 2, y lo ejecuta en un simulador MIPS (MARS o el simulador interno).
 
 **Esta carpeta es autocontenida.** `src/compiscript/` es una **copia** del frontend + TAC de
-`../intermediate-code` (Fase 2, congelada y sin tocar) con cuatro cambios mínimos documentados en
+`../intermediate-code` (Fase 2, congelada y sin tocar) con cinco cambios mínimos documentados en
 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) §5; `src/mipscodegen/` es el código nuevo de esta fase.
 
 ```
@@ -45,7 +45,8 @@ pip install -e ".[dev,ide]"      # dev = pytest · ide = streamlit + streamlit-a
 
 MARS es un binario de terceros y **no se versiona** (`.gitignore`).
 
-1. Descarga `Mars4_5.jar` de https://courses.missouristate.edu/kenvollmar/mars/
+1. Descarga `Mars4_5.jar` de https://github.com/dpetersanderson/MARS/releases/download/v.4.5.1/Mars4_5.jar
+   (el sitio original de Missouri State ya no está disponible)
 2. Cópialo como `tools/mars/Mars.jar`:
    ```bash
    mkdir -p tools/mars && mv ~/Downloads/Mars4_5.jar tools/mars/Mars.jar
@@ -76,13 +77,13 @@ Cómo se usa:
    - **🧮 MIPS**: el assembler generado (botón «Descargar .s»).
    - **📄 TAC**: código intermedio, simbólico o con direcciones (`fp[off]`, `gp[off]`).
    - **🗂️ Tabla de símbolos**: scopes, offsets y registros de activación.
-   - **▶️ Ejecutar**: elige simulador (MARS si hay Java + jar; si no, el interno) y muestra la salida
-     y el código de salida (1 = excepción no capturada).
-4. La barra lateral también permite **desactivar la asignación de registros `$s`** (línea base todo por
-   memoria) y los comentarios TAC dentro del asm, para comparar.
+   - **▶️ Ejecutar**: elige simulador (interno por defecto; MARS si hay Java + jar) y muestra la salida
+     y el código de salida (1 = excepción no capturada), en ambos motores.
+4. La barra lateral también permite **desactivar la asignación de registros `$s`** (las variables quedan en
+   el frame; getReg con `$t` sigue activo) y los comentarios TAC dentro del asm, para comparar.
 
 Con Docker (sin instalar Python): `docker build --rm . -t csp-mips && docker run --rm -p 8501:8501 csp-mips`
-y abre http://localhost:8501 (ver [`docs/USAGE.md`](docs/USAGE.md) §6; ese Dockerfile aún no se ha probado).
+y abre http://localhost:8501 (ver [`docs/USAGE.md`](docs/USAGE.md) §6).
 
 ## 4. Usar la línea de comandos
 
@@ -90,7 +91,7 @@ y abre http://localhost:8501 (ver [`docs/USAGE.md`](docs/USAGE.md) §6; ese Dock
 python -m mipscodegen.main examples/factorial.cps --run          # compila y ejecuta → 120
 python -m mipscodegen.main examples/clases.cps --run             # → Toby ladra.
 python -m mipscodegen.main examples/factorial.cps --out f.s      # guarda el assembler
-python -m mipscodegen.main prog.cps --no-regalloc                # línea base: todo por memoria
+python -m mipscodegen.main prog.cps --no-regalloc                # sin $s: variables en el frame
 python -m mipscodegen.main prog.cps --no-comments                # asm sin el TAC como comentario
 java -jar tools/mars/Mars.jar nc f.s                             # ejecutar el .s en MARS (consola)
 java -jar tools/mars/Mars.jar                                    # GUI de MARS: File→Open, F3 ensamblar, F5 ejecutar
@@ -133,7 +134,7 @@ python -m mipscodegen.main tests/cases/runtime_failure/indice_fuera_de_rango_sin
 ```
 
 Cómo leer el resultado de `pytest -q`: `N passed, M skipped`. Los *skipped* son (a) los tests de MARS si
-no hay Java/jar y (b) 2 de higiene que se activan cuando las fases anteriores ya están commiteadas.
+no hay Java/jar y (b) los del IDE si no está instalado `streamlit` (`pip install -e ".[ide]"`).
 **Ningún test debe fallar.** Si cambias el backend, regenera la documentación de ejemplos:
 `python tools/gen_examples.py` (`test_docs_examples.py` falla si está desactualizada).
 
@@ -190,5 +191,6 @@ mips-codegen/
 ## 10. Límites conocidos
 
 `==` entre strings compara referencias; un entero ≈ 268 millones dentro de un `any` se imprimiría como
-texto; enteros de 32 bits con desbordamiento modular; no hay `float`. Detalle en
+texto; enteros de 32 bits con desbordamiento modular; `float` se rechaza con un error de compilación (la gramática lo acepta, el
+backend solo genera aritmética entera). Detalle en
 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) §6.

@@ -33,9 +33,19 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - name: Download MARS 4.5 (verificado por sha256)
+        run: |
+          mkdir -p tools/mars
+          curl -fsSL -o tools/mars/Mars.jar \
+            https://github.com/dpetersanderson/MARS/releases/download/v.4.5.1/Mars4_5.jar
+          echo "ac340b676ba2b62246b9df77e62f81ad4447bcfd329ab539716bcd09950b7096  tools/mars/Mars.jar" | sha256sum -c -
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -e ".[dev]"
-      - name: Run tests (los marcados `simulator` se omiten sin MARS)
-        run: pytest -q
+          pip install -e ".[dev,ide]"
+      - name: Run tests (incluye MARS y el IDE; no debe haber skipped)
+        run: pytest -q -rs

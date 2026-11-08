@@ -43,17 +43,17 @@ streamlit run src/mipscodegen/ide/app.py        # abre http://localhost:8501 (de
 ```
 
 Editor con ejemplos cargables, botón **Compilar** y pestañas de MIPS, TAC, tabla de símbolos y
-**Ejecutar** (MARS si está disponible, si no el simulador interno).
+**Ejecutar** (elige simulador interno o MARS, si está disponible).
 
 ### 4. Correr toda la batería de tests
 
 ```bash
-pytest -q          # esperado: 0 fallos (los skipped son los tests de MARS sin jar y 2 de higiene)
+pytest -q          # esperado: 0 fallos (los skipped son los tests de MARS si no hay Java/jar, y los del IDE si falta streamlit)
 ```
 
 ### 5. Validar en MARS (simulador oficial, opcional)
 
-Descarga `Mars4_5.jar` de https://courses.missouristate.edu/kenvollmar/mars/ y guárdalo como
+Descarga `Mars4_5.jar` de https://github.com/dpetersanderson/MARS/releases/download/v.4.5.1/Mars4_5.jar y guárdalo como
 `mips-codegen/tools/mars/Mars.jar` (no se versiona). Después:
 
 ```bash

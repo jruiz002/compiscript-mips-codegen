@@ -154,7 +154,7 @@ Reglas de uso (`ir/tac_generator.py`):
    cuyos elementos leen la misma variable (`a = [a[1], a[0]]`) o hacen llamadas se arma
    primero en un temporal y luego se copia, para no leer el arreglo nuevo a medio construir.
 
-Ejemplo real (`tests/cases/success/temp_reuse.cps`) para `x = (a + b) * (c - d) + e;`:
+Ejemplo real (`tests/tac/cases/success/temp_reuse.cps`) para `x = (a + b) * (c - d) + e;`:
 
 ```
 t0 = a + b
@@ -271,7 +271,7 @@ endfunc f_crearContador__siguiente
   `str()` en ambos. **Cambio de la Fase 3:** un backend de máquina no distingue un entero de un
   puntero sin información de tipo; `tostr` sigue siendo genérico.
 
-## 9. Ejemplo completo (`tests/cases/success/factorial.cps`)
+## 9. Ejemplo completo (`tests/tac/cases/success/factorial.cps`)
 
 ```cps
 function factorial(n: integer): integer {
@@ -324,6 +324,8 @@ toda la función, por lo que `max_temps = 1` y `frame_size = 4 (slot del static 
   instrucción sensible al tipo es `DIV`: si ambos operandos son enteros trunca hacia cero
   (convención C/Java), si alguno es flotante hace división real. Limitación conocida: el TAC
   impreso no distingue si una `Const` es entera o flotante salvo por su valor (`5` vs `5.0`).
+  **Fase 3:** el backend MIPS solo genera aritmética entera, así que `compile_to_mips` rechaza
+  `float` con un error de compilación (ver `ARCHITECTURE.md` §6).
 - **Registro de activación de `main`:** las sentencias de nivel superior se agrupan en una
   función `main` real (con su propio frame para temporales), pero las declaraciones `let`/
   `const` de nivel superior — incluso dentro de bloques/if/while sueltos a nivel de programa —

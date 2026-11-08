@@ -126,7 +126,7 @@ def render() -> str:
         "## Asignación de registros: efecto de `$s`\n",
         "El mismo `while` compilado con y sin promoción a `$s` (`--no-regalloc`). Con promoción, "
         "las locales `i`, `s` y el parámetro `n` viven en `$s0-$s2` durante todo el ciclo y la función los salva/restaura en "
-        "prólogo y epílogo (callee-saved); sin ella, cada uso es un `lw`/`sw` al frame.\n",
+        "prólogo y epílogo (callee-saved); sin ella, viven en el frame: se cargan con `lw` al entrar a cada bloque básico y se guardan con `sw` al salir (dentro del bloque, getReg las mantiene en `$t`).\n",
         f"```typescript\n{loop.rstrip()}\n```\n",
         "**Con registros `$s`** (por defecto)\n", f"```asm\n{_user_asm(on.asm)}\n```\n",
         "**Sin promoción** (`--no-regalloc`)\n", f"```asm\n{_user_asm(off.asm)}\n```\n",

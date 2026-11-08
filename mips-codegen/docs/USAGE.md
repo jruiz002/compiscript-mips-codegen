@@ -20,7 +20,7 @@ Un solo paquete editable instala `compiscript` (frontend + TAC, copia de la Fase
 
 MARS es un binario de terceros y **no se versiona** (`.gitignore`).
 
-1. Descarga `Mars4_5.jar` desde https://courses.missouristate.edu/kenvollmar/mars/
+1. Descarga `Mars4_5.jar` desde https://github.com/dpetersanderson/MARS/releases/download/v.4.5.1/Mars4_5.jar
 2. Cópialo como `tools/mars/Mars.jar` (o apunta con `export MARS_JAR=/ruta/Mars4_5.jar`).
 3. Comprueba que Java está disponible: `java -version`.
 
@@ -38,7 +38,7 @@ asume `.data` en `0x10010000`.
 python -m mipscodegen.main examples/factorial.cps                 # imprime el .s por stdout
 python -m mipscodegen.main examples/factorial.cps --out f.s       # lo guarda
 python -m mipscodegen.main examples/factorial.cps --run           # compila y ejecuta (simulador interno)
-python -m mipscodegen.main prog.cps --no-regalloc                 # línea base: todo por memoria
+python -m mipscodegen.main prog.cps --no-regalloc                 # sin $s: variables en el frame
 python -m mipscodegen.main prog.cps --no-comments                 # asm sin el TAC como comentario
 java -jar tools/mars/Mars.jar nc f.s                              # ejecutar el .s en MARS
 ```
@@ -70,7 +70,7 @@ streamlit run src/mipscodegen/ide/app.py
 - **Compilar**: errores con línea y columna, o pestañas con **MIPS** (descargable), **TAC**
   (simbólico o con direcciones `fp[off]`/`gp[off]`), **tabla de símbolos** y registros de
   activación, y **Ejecutar**.
-- **Ejecutar** usa MARS si hay Java y jar; si no, el simulador interno. La salida y el código de
+- **Ejecutar** usa el simulador elegido (interno por defecto; MARS si hay Java y jar). La salida y el código de
   salida se muestran en el panel.
 - La barra lateral permite desactivar la asignación de registros `$s` y los comentarios TAC.
 
@@ -83,8 +83,7 @@ docker run --rm -p 8501:8501 -v "$(pwd)/tools/mars:/app/tools/mars" csp-mips
 ```
 
 La imagen incluye Java; MARS no se versiona, así que debe estar en `tools/mars/Mars.jar` al
-construir o montarse como arriba. (Este `Dockerfile` no se pudo probar en la máquina de desarrollo
-por no tener el daemon de Docker activo: validar antes de entregar.)
+construir o montarse como arriba.
 
 ## 7. Tests
 
@@ -129,7 +128,7 @@ Si cambias el backend, `test_docs_examples.py` fallará hasta que lo regeneres.
 ## 9. Regenerar el parser (solo si cambia la gramática)
 
 ```bash
-antlr -Dlanguage=Python3 -visitor -no-listener -o src/compiscript/generated grammar/Compiscript.g4
+java -jar ../semantic-analyzer/antlr-4.13.2-complete.jar -Dlanguage=Python3 -visitor -o src/compiscript/generated grammar/Compiscript.g4
 ```
 
 No editar `src/compiscript/generated/` a mano.

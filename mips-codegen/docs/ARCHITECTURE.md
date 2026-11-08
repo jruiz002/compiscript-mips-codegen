@@ -84,7 +84,8 @@ Epílogo (`epi_<f>`): restaura `$s`, `move $sp,$fp; lw $ra; lw $fp; addiu $sp,8;
   van a registro. **No** se promueve en funciones con `try` (el desenrollado restaura los `$s` al
   valor del `try_begin`) ni en funciones que contienen anidadas (estas acceden a sus variables
   por `up`, o sea por memoria).
-- `--no-regalloc` desactiva la promoción (línea base todo-por-memoria) y los tests corren ambos modos.
+- `--no-regalloc` desactiva la promoción a `$s` (las variables quedan en el frame; `getReg` con `$t`, el spilling
+  y la liveness siguen activos) y los tests corren ambos modos.
 
 ## 4. Runtime (`backend/runtime.py`)
 
@@ -114,6 +115,14 @@ un `return` dentro de un `try` no deja un handler colgando.
 3. **`print(null)`** (tipo estático `null`) imprime `null`, como TypeScript: se emite `print_str` sobre el
    string interno `"null"` (antes imprimía `0`).
 4. `printer.format_quad` público (alias) para anotar el asm con el TAC.
+5. **`break`/`continue` dentro de un `try`** emiten un `try_end` por cada `try` que abandonan
+   (`LoopContext.try_depth` en `tac_generator.py`). Antes el handler quedaba activo: una excepción
+   posterior volvía a saltar al `catch` de un `try` ya terminado y, si el mismo `try` se re-ejecutaba
+   (`continue`), su registro quedaba enlazado consigo mismo y `rt_throw` ciclaba para siempre.
+   Test: `tests/cases/success/break_continue_en_try.cps`.
+
+La copia omite además `compiscript/ide/` y `compiscript/main.py` de la Fase 2 (el IDE y el CLI de
+esta fase están en `mipscodegen/`).
 
 ## 6. Supuestos y límites conocidos
 
@@ -122,19 +131,22 @@ un `return` dentro de un `try` no deja un handler colgando.
   como texto. Requiere la configuración de memoria por defecto de MARS (no la «compact»).
 - `==`/`!=` sobre strings comparan **referencias** (el TAC no distingue el tipo del operando).
 - `null` se imprime como `null` (cambio 3 de §5); concatenar un `null` dentro de un string en un `any` depende de la heurística de `rt_tostr`.
-- División por cero: el simulador interno la reporta; MARS no atrapa (HI/LO quedan sin cambio).
-- Un `break`/`continue` que sale de un `try` no emite `try_end` (comportamiento heredado de la
-  Fase 2, idéntico en su intérprete): el handler sigue activo hasta que otro `try` lo reemplaza o
-  la función retorna.
+- División por cero no es atrapable con `try`/`catch` y los motores difieren: MARS sigue con `0`,
+  el simulador interno aborta (código 2).
+- Acceder a un campo de un objeto `null` no se verifica: MARS reporta *address out of range*; el
+  simulador interno lee `0`.
+- Orden de evaluación (heredado de la Fase 2): una variable simple a la izquierda de una llamada
+  se lee después de la llamada (`g + f() + g`, si `f` modifica `g`, usa el `g` nuevo en ambos lados).
 - Enteros de 32 bits con desbordamiento modular (el intérprete usa enteros de Python sin límite).
-- No hay `float` (la gramática no lo tiene).
+- `float`: la gramática lo acepta, pero el backend solo genera aritmética entera; `compile_to_mips`
+  lo rechaza con `[ERROR] Line L:C — float no soportado ...` en vez de truncar en silencio.
 
 ## 7. Validación
 
-`pytest -q` (≈270 tests, con MARS instalado): incluye los 85 del TAC heredados de la Fase 2;
+`pytest -q` (≈500 tests con MARS instalado; ≈400 sin él): incluye los 86 del TAC (`tests/tac/`, 82 heredados de la Fase 2);
 unitarios de `getReg()` y del frame; 20+ programas ejecutados en MIPS y comparados con (a) el
 intérprete del TAC y (b) valores calculados a mano, cada uno con y sin asignación de registros;
 corpus de errores de compilación y de ejecución (`tests/cases/failure`, `runtime_failure`); y los
-mismos programas y los 32 casos con `.out` ejecutados en **MARS 4.5** y comparados con la salida
+mismos programas y los casos con `.out` (con y sin `$s`) ejecutados en **MARS 4.5** y comparados con la salida
 esperada (`tests/test_simulator.py`, se omiten sin Java/jar). Ejemplos documentados en
 [`EJEMPLOS.md`](EJEMPLOS.md), generados por `tools/gen_examples.py`.
