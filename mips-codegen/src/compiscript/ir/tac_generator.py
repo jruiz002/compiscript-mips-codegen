@@ -30,6 +30,7 @@ _EQ_JUMPS = {"==": OpCode.IF_EQ, "!=": OpCode.IF_NE}
 class LoopContext:
     break_label: str
     continue_label: Optional[str]
+    try_depth: int = 0  # trys abiertos al entrar al ciclo: break/continue cierran los demás
 
 
 def _is_string_type(t: Optional[CompiscriptType]) -> bool:
@@ -53,6 +54,7 @@ class TACGenerator:
         self.program = TACProgram()
         self.labels = LabelGenerator()
         self.loop_stack: List[LoopContext] = []
+        self.try_depth = 0
         self.current_function: TACFunction
         self.temps: TempAllocator
         self._function_stack: list = []
@@ -248,7 +250,7 @@ class TACGenerator:
         l_end = self.labels.new_label()
         self._emit(OpCode.LABEL, None, None, Label(l_cond))
         self._gen_cond(ctx.expression(), None, l_end)
-        self.loop_stack.append(LoopContext(l_end, l_cond))
+        self.loop_stack.append(LoopContext(l_end, l_cond, self.try_depth))
         self._gen_block(ctx.block())
         self.loop_stack.pop()
         self._emit(OpCode.GOTO, None, None, Label(l_cond))
@@ -259,7 +261,7 @@ class TACGenerator:
         l_cond = self.labels.new_label()
         l_end = self.labels.new_label()
         self._emit(OpCode.LABEL, None, None, Label(l_start))
-        self.loop_stack.append(LoopContext(l_end, l_cond))
+        self.loop_stack.append(LoopContext(l_end, l_cond, self.try_depth))
         self._gen_block(ctx.block())
         self.loop_stack.pop()
         self._emit(OpCode.LABEL, None, None, Label(l_cond))
@@ -278,7 +280,7 @@ class TACGenerator:
         self._emit(OpCode.LABEL, None, None, Label(l_cond))
         if expressions:
             self._gen_cond(expressions[0], None, l_end)
-        self.loop_stack.append(LoopContext(l_end, l_update))
+        self.loop_stack.append(LoopContext(l_end, l_update, self.try_depth))
         self._gen_block(ctx.block())
         self.loop_stack.pop()
         self._emit(OpCode.LABEL, None, None, Label(l_update))
@@ -314,7 +316,7 @@ class TACGenerator:
         self._emit(OpCode.LOAD, array_local, byte_off, item_target)
         self.temps.release(byte_off)
 
-        self.loop_stack.append(LoopContext(l_end, l_update))
+        self.loop_stack.append(LoopContext(l_end, l_update, self.try_depth))
         self._gen_block(ctx.block())
         self.loop_stack.pop()
 
@@ -323,13 +325,20 @@ class TACGenerator:
         self._emit(OpCode.GOTO, None, None, Label(l_cond))
         self._emit(OpCode.LABEL, None, None, Label(l_end))
 
+    def _close_trys(self, lc: LoopContext) -> None:
+        """Saltar fuera de un try sin pasar por su TRY_END dejaría su handler activo."""
+        for _ in range(self.try_depth - lc.try_depth):
+            self._emit(OpCode.TRY_END)
+
     def _gen_break(self) -> None:
         if self.loop_stack:
+            self._close_trys(self.loop_stack[-1])
             self._emit(OpCode.GOTO, None, None, Label(self.loop_stack[-1].break_label))
 
     def _gen_continue(self) -> None:
         for lc in reversed(self.loop_stack):
             if lc.continue_label is not None:
+                self._close_trys(lc)
                 self._emit(OpCode.GOTO, None, None, Label(lc.continue_label))
                 return
 
@@ -345,7 +354,9 @@ class TACGenerator:
         l_catch = self.labels.new_label()
         l_end = self.labels.new_label()
         self._emit(OpCode.TRY_BEGIN, None, None, Label(l_catch))
+        self.try_depth += 1
         self._gen_block(ctx.block(0))
+        self.try_depth -= 1
         self._emit(OpCode.TRY_END)
         self._emit(OpCode.GOTO, None, None, Label(l_end))
         self._emit(OpCode.LABEL, None, None, Label(l_catch))
@@ -369,7 +380,7 @@ class TACGenerator:
         self.temps.release(value)
         self._emit(OpCode.GOTO, None, None, Label(l_default))
 
-        self.loop_stack.append(LoopContext(l_end, None))
+        self.loop_stack.append(LoopContext(l_end, None, self.try_depth))
         for case_ctx, l_case in zip(cases, case_labels):
             self._emit(OpCode.LABEL, None, None, Label(l_case))
             for stmt in case_ctx.statement():
