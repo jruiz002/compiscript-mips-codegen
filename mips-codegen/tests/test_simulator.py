@@ -48,8 +48,8 @@ _CASES = sorted(
 @pytest.mark.parametrize("regalloc", [True, False], ids=["regalloc", "no-regalloc"])
 @pytest.mark.parametrize("cps", _CASES, ids=lambda p: p.stem)
 def test_mars_matches_expected_output_of_case_files(cps: Path, regalloc: bool) -> None:
-    asm = compile_to_mips(cps.read_text(), regalloc=regalloc).asm
-    assert simulator.run_asm(asm).strip() == cps.with_suffix(".out").read_text().strip()
+    asm = compile_to_mips(cps.read_text(encoding="utf-8"), regalloc=regalloc).asm
+    assert simulator.run_asm(asm).strip() == cps.with_suffix(".out").read_text(encoding="utf-8").strip()
 
 
 @_MARS_ONLY
@@ -57,3 +57,24 @@ def test_mars_uncaught_exception_exits_nonzero_with_message() -> None:
     asm = build("let v: integer[] = [1];\nprint(v[3]);\n").asm
     with pytest.raises(RuntimeError, match="Excepcion no capturada: indice fuera de rango: 3"):
         simulator.run_asm(asm)
+
+
+@_MARS_ONLY
+def test_mars_run_returns_exit_code_of_uncaught_exception() -> None:
+    res = simulator.run(build("let v: integer[] = [1];\nprint(v[3]);\n").asm)
+    assert res.exit_code == 1 and "indice fuera de rango: 3" in res.stdout
+
+
+@_MARS_ONLY
+def test_mars_runtime_error_is_not_reported_as_success() -> None:
+    """MARS sale con 0 aunque el programa reviente (p. ej. desborde de pila)."""
+    asm = build("function f(n: integer): integer { return f(n + 1); }\nprint(f(1));\n").asm
+    with pytest.raises(RuntimeError, match="Runtime exception"):
+        simulator.run(asm)
+
+
+@_MARS_ONLY
+def test_mars_infinite_loop_times_out_cleanly() -> None:
+    asm = build("let i: integer = 0;\nwhile (true) { i = i + 1; }\n").asm
+    with pytest.raises(RuntimeError, match="no termino"):
+        simulator.run(asm, timeout=2)

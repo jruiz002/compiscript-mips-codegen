@@ -29,5 +29,16 @@ def test_uncaught_exception_exits_one(capsys) -> None:
 def test_out_and_run_together_do_both(capsys, tmp_path) -> None:
     out = tmp_path / "f.s"
     assert main([str(EXAMPLES / "factorial.cps"), "--out", str(out), "--run"]) == 0
-    assert out.read_text().startswith("# Generado por mipscodegen")
+    assert out.read_text(encoding="utf-8").startswith("# Generado por mipscodegen")
     assert capsys.readouterr().out == "120\n"
+
+
+def test_missing_source_is_an_error_not_a_traceback(capsys, tmp_path) -> None:
+    assert main([str(tmp_path / "no_existe.cps")]) == 1
+    assert "[ERROR] no se pudo leer" in capsys.readouterr().err
+
+
+def test_out_into_missing_directory_is_an_error(capsys, tmp_path) -> None:
+    out = tmp_path / "no" / "existe" / "f.s"
+    assert main([str(EXAMPLES / "factorial.cps"), "--out", str(out)]) == 1
+    assert "[ERROR] no se pudo escribir" in capsys.readouterr().err

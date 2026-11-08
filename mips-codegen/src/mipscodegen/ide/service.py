@@ -44,8 +44,9 @@ def execute(asm: str, engine: str = ENGINE_INTERNAL) -> RunOutcome:
     """Ejecuta el assembler; los fallos del programa se devuelven, no se lanzan."""
     if engine == ENGINE_MARS:
         try:
-            return RunOutcome(engine, stdout=simulator.run_asm(asm), exit_code=0)
-        except (simulator.SimulatorUnavailable, RuntimeError) as exc:
+            res = simulator.run(asm)
+            return RunOutcome(engine, stdout=res.stdout, exit_code=res.exit_code)
+        except RuntimeError as exc:  # incluye SimulatorUnavailable, timeout y errores de MARS
             return RunOutcome(engine, error=str(exc))
     try:
         res = run_internal(asm)
