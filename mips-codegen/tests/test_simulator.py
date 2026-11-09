@@ -67,7 +67,7 @@ def test_mars_run_returns_exit_code_of_uncaught_exception() -> None:
 
 @_MARS_ONLY
 def test_mars_runtime_error_is_not_reported_as_success() -> None:
-    """MARS sale con 0 aunque el programa reviente (p. ej. desborde de pila)."""
+    """Sin `se3`, MARS saldria con 0 aunque el programa reviente (p. ej. desborde de pila)."""
     asm = build("function f(n: integer): integer { return f(n + 1); }\nprint(f(1));\n").asm
     with pytest.raises(RuntimeError, match="Runtime exception"):
         simulator.run(asm)
@@ -78,3 +78,18 @@ def test_mars_infinite_loop_times_out_cleanly() -> None:
     asm = build("let i: integer = 0;\nwhile (true) { i = i + 1; }\n").asm
     with pytest.raises(RuntimeError, match="no termino"):
         simulator.run(asm, timeout=2)
+
+
+@_MARS_ONLY
+def test_mars_error_text_printed_by_program_is_not_an_error() -> None:
+    out = simulator.run_asm(build('print("Processing terminated due to errors");\n').asm)
+    assert out == "Processing terminated due to errors\n"
+
+
+@_MARS_ONLY
+def test_mars_java_startup_failure_keeps_diagnostic(tmp_path, monkeypatch) -> None:
+    bad = tmp_path / "Mars.jar"
+    bad.write_text("no es un jar")
+    monkeypatch.setenv("MARS_JAR", str(bad))
+    with pytest.raises(RuntimeError, match="(?i)jar"):
+        simulator.run(build("print(1);\n").asm)

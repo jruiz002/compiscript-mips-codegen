@@ -35,7 +35,8 @@ class MarsRun:
     exit_code: int  # 0 = normal; 1 = excepcion no capturada (syscall 17)
 
 
-_MARS_ERROR = "Processing terminated due to errors"
+# ae2/se3: MARS sale con 2 (error de ensamblado) o 3 (error de ejecucion); el runtime solo usa 0 y 1.
+_MARS_ERRORS = {2: "error de ensamblado", 3: "error de ejecucion"}
 _LATIN1 = [f"-D{p}=ISO-8859-1" for p in ("file.encoding", "stdout.encoding", "sun.stdout.encoding")]
 
 
@@ -56,17 +57,19 @@ def run(asm: str, timeout: float = 20.0) -> MarsRun:
             proc = subprocess.run(
                 # MARS imprime cada byte del string como un char; con ISO-8859-1 Java los
                 # escribe tal cual y llegan los bytes UTF-8 originales (sin esto: cp1252/doble UTF-8).
-                ["java", *_LATIN1, "-jar", str(jar), "nc", str(path)], stdin=subprocess.DEVNULL,
+                ["java", *_LATIN1, "-jar", str(jar), "nc", "ae2", "se3", str(path)],
+                stdin=subprocess.DEVNULL,
                 capture_output=True, text=True, encoding="utf-8", errors="replace",
                 timeout=timeout, check=False,
             )
         except subprocess.TimeoutExpired:
             raise RuntimeError(f"MARS no termino en {timeout:g} s (¿ciclo infinito?)") from None
     out = proc.stdout.replace("\r\n", "\n")
-    if _MARS_ERROR in out:
+    if proc.returncode in _MARS_ERRORS:
         detail = next((ln for ln in out.splitlines() if ln.startswith("Error in")), out.strip())
-        raise RuntimeError(f"MARS: {detail}")
-    if proc.returncode not in (0, 1):
+        raise RuntimeError(f"MARS ({_MARS_ERRORS[proc.returncode]}): {detail}")
+    # MARS nunca escribe en stderr: si hay algo, Java no pudo arrancar (p. ej. jar corrupto, rc 1).
+    if proc.stderr.strip() or proc.returncode not in (0, 1):
         raise RuntimeError(f"MARS fallo ({proc.returncode}): {proc.stderr or out}")
     # MARS imprime un salto de linea extra al terminar (incluso con un programa vacio).
     return MarsRun(out[:-1] if out.endswith("\n") else out, proc.returncode)
