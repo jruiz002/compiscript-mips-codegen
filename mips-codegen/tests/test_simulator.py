@@ -93,3 +93,15 @@ def test_mars_java_startup_failure_keeps_diagnostic(tmp_path, monkeypatch) -> No
     monkeypatch.setenv("MARS_JAR", str(bad))
     with pytest.raises(RuntimeError, match="(?i)jar"):
         simulator.run(build("print(1);\n").asm)
+
+
+@_MARS_ONLY
+def test_mars_ignores_java_logging_on_stderr(monkeypatch) -> None:
+    """En Linux (CI) java.util.prefs escribe en stderr aunque el programa corra bien."""
+    import subprocess
+    noise = ("Nov 09, 2026 1:59:08 AM java.util.prefs.FileSystemPreferences$1 run\n"
+             "INFO: Created user preferences directory.\n")
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: subprocess.CompletedProcess(
+        a[0], 1, stdout="Excepcion no capturada: x\n\n", stderr=noise))
+    res = simulator.run("")
+    assert res.exit_code == 1 and res.stdout == "Excepcion no capturada: x\n"

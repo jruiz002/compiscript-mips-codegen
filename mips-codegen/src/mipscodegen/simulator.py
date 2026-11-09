@@ -68,8 +68,10 @@ def run(asm: str, timeout: float = 20.0) -> MarsRun:
     if proc.returncode in _MARS_ERRORS:
         detail = next((ln for ln in out.splitlines() if ln.startswith("Error in")), out.strip())
         raise RuntimeError(f"MARS ({_MARS_ERRORS[proc.returncode]}): {detail}")
-    # MARS nunca escribe en stderr: si hay algo, Java no pudo arrancar (p. ej. jar corrupto, rc 1).
-    if proc.stderr.strip() or proc.returncode not in (0, 1):
+    # Java que no arranca (jar corrupto/inaccesible) sale con rc 1, como el syscall 17; se reconoce
+    # por el mensaje del launcher. No basta "stderr no vacio": en Linux java.util.prefs loguea ahi.
+    startup = any(ln.startswith(("Error", "Exception in thread")) for ln in proc.stderr.splitlines())
+    if startup or proc.returncode not in (0, 1):
         raise RuntimeError(f"MARS fallo ({proc.returncode}): {proc.stderr or out}")
     # MARS imprime un salto de linea extra al terminar (incluso con un programa vacio).
     return MarsRun(out[:-1] if out.endswith("\n") else out, proc.returncode)
