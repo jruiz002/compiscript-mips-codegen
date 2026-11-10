@@ -38,6 +38,8 @@ class SemanticAnalyzer(CompiscriptVisitor):
         self._class_registry: dict[str, ClassType] = {}
         self._in_constructor = False
         self._used_labels: set[str] = set()  # etiquetas de función ya entregadas
+        self._capturing_classes: set[str] = set()  # campos que usan locales envolventes
+        self._pending_news: list = []  # (ctx, ClassType, dentro de un método)
         # tablas para el generador de TAC
         self.node_types: dict = {}
         self.scope_of: dict = {}
@@ -113,22 +115,43 @@ class SemanticAnalyzer(CompiscriptVisitor):
                 return self._class_registry.get(scope.name)
         return None
 
+    @staticmethod
+    def _is_method_scope(scope) -> bool:
+        return scope.scope_kind == "function" and scope.parent is not None             and scope.parent.scope_kind == "class"
+
     def _check_method_capture(self, ctx, sym: Symbol) -> None:
         """Un método no tiene static link: no puede usar locales, parámetros ni funciones
-        anidadas de la función donde se declaró su clase."""
-        crossed_class: str | None = None
+        anidadas de la función donde se declaró su clase. Un inicializador de campo sí puede:
+        se genera en el `new`, dentro de esa función (ver `_check_new_in_method`)."""
+        if not (sym.storage in ("local", "param") or sym.extra.get("has_static_link")):
+            return
+        method_class: str | None = None
+        field_class: str | None = None
         for scope in reversed(self.symbols._scope_stack):
             if scope._symbols.get(sym.name) is sym:
                 break
-            if scope.scope_kind == "class" and crossed_class is None:
-                crossed_class = scope.name
+            if self._is_method_scope(scope) and method_class is None:
+                method_class = scope.parent.name
+            elif scope.scope_kind == "class" and method_class is None and field_class is None:
+                field_class = scope.name
         else:
             return
-        if crossed_class is None:
-            return
-        if sym.storage in ("local", "param") or sym.extra.get("has_static_link"):
-            self._err(ctx, f"Class '{crossed_class}' cannot access '{sym.name}' of its enclosing "
+        if method_class is not None:
+            self._err(ctx, f"Class '{method_class}' cannot access '{sym.name}' of its enclosing "
                            f"function (methods cannot capture locals, parameters or nested functions)")
+        elif field_class is not None:
+            self._capturing_classes.add(field_class)
+
+    def _check_new_in_method(self) -> None:
+        """Los inicializadores de campo que usan locales de la función envolvente se generan en
+        cada `new`; dentro de un método (sin static link) esas locales no son alcanzables."""
+        for ctx, ct, in_method in self._pending_news:
+            c = ct
+            while c is not None and c.name not in self._capturing_classes:
+                c = c.superclass
+            if c is not None and in_method:
+                self._err(ctx, f"Cannot create '{ct.name}' inside a method: the field initializers "
+                               f"of '{c.name}' use locals of its enclosing function")
 
     def _assign_storage(self, sym: Symbol) -> None:
         """Asigna la dirección de sym según dónde se declaró (global, local o atributo)."""
@@ -155,6 +178,7 @@ class SemanticAnalyzer(CompiscriptVisitor):
                 self._pre_register_class(cd)
         # Second pass: full visit
         self.visitChildren(ctx)
+        self._check_new_in_method()
         return None
 
     def _pre_register_class(self, ctx: CompiscriptParser.ClassDeclarationContext):
@@ -937,6 +961,12 @@ class SemanticAnalyzer(CompiscriptVisitor):
             self._err(ctx, f"Unknown class '{class_name}'")
             return ERROR_TYPE
         ct = self._class_registry[class_name]
+        # solo cuentan los métodos por debajo del scope donde se declaró la clase
+        stack = self.symbols._scope_stack
+        decl = next((i for i in range(len(stack) - 1, -1, -1)
+                     if class_name in stack[i]._symbols), 0)
+        self._pending_news.append(
+            (ctx, ct, any(self._is_method_scope(sc) for sc in stack[decl + 1:])))
         args = ctx.arguments()
         arg_types = [self.visit(e) for e in args.expression()] if args else []
         constructor = ct.resolve_member("constructor")  # hereda el de la superclase si no hay propio

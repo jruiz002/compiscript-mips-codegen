@@ -128,10 +128,12 @@ un `return` dentro de un `try` no deja un handler colgando.
 7. **Etiquetas de función únicas y clases locales** (`semantic_analyzer.py`, `memory_layout.py`):
    una etiqueta repetida recibe sufijo `_2`, `_3`… (la clase `f` con método `x` chocaba con la
    función global `x`: ambas `f_x`). Un método siempre es `Clase_metodo` sin static link, aunque su
-   clase se declare dentro de una función (antes su vtable quedaba en `0`); si usa una local de esa
-   función es un error semántico. La vtable toma la etiqueta real del símbolo y el backend falla si
+   clase se declare dentro de una función (antes su vtable quedaba en `0`); si un método usa una
+   local de esa función es un error semántico. Un inicializador de campo sí puede usarla (se genera
+   en cada `new`), salvo que ese `new` esté dentro de un método. La vtable toma la etiqueta real del símbolo y el backend falla si
    a un slot le falta su función. Tests: `etiquetas_colision.cps`, `clase_local.cps`,
-   `failure/clase_local_captura.cps`.
+   `clase_local_inicializador.cps`,
+   `failure/clase_local_captura.cps`, `failure/clase_local_new_en_metodo.cps`.
 8. **Anidamiento excesivo** (`pipeline.py`): un `RecursionError` del parser o de los visitors
    (desde ≈22 niveles de paréntesis) se reporta como `[ERROR] Line L:C — expresion demasiado
    anidada ...` en vez de un traceback.
@@ -154,7 +156,9 @@ esta fase están en `mipscodegen/`).
   antes que `a` e `i` (TypeScript evalúa primero el destino). El resto va de izquierda a derecha
   (cambio 6 de §5).
 - Un método de una clase declarada dentro de una función no puede usar las locales de esa función
-  (error semántico; cambio 7 de §5).
+  (error semántico; cambio 7 de §5). Los inicializadores de campo sí, salvo un `new` dentro de un método.
+- El registro de clases es global por nombre: dos clases locales con el mismo nombre en funciones
+  distintas chocan.
 - Enteros de 32 bits con desbordamiento modular (el intérprete usa enteros de Python sin límite).
 - `float`: la gramática lo acepta, pero el backend solo genera aritmética entera; `compile_to_mips`
   lo rechaza con `[ERROR] Line L:C — float no soportado ...` en vez de truncar en silencio.
