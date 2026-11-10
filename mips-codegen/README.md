@@ -4,7 +4,7 @@ Traduce **Compiscript** (subset de TypeScript) a assembler **MIPS32**, pasando p
 Tres Direcciones (TAC) de la Fase 2, y lo ejecuta en un simulador MIPS (MARS o el simulador interno).
 
 **Esta carpeta es autocontenida.** `src/compiscript/` es una **copia** del frontend + TAC de
-`../intermediate-code` (Fase 2, congelada y sin tocar) con cinco cambios mínimos documentados en
+`../intermediate-code` (Fase 2, congelada y sin tocar) con ocho cambios mínimos documentados en
 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) §5; `src/mipscodegen/` es el código nuevo de esta fase.
 
 ```
