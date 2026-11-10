@@ -157,8 +157,8 @@ esta fase están en `mipscodegen/`).
   (cambio 6 de §5).
 - Un método de una clase declarada dentro de una función no puede usar las locales de esa función
   (error semántico; cambio 7 de §5). Los inicializadores de campo sí, salvo un `new` dentro de un método.
-- El registro de clases es global por nombre: dos clases locales con el mismo nombre en funciones
-  distintas chocan.
+- El registro de clases es global por nombre, así que un nombre de clase no puede repetirse en el
+  programa, ni siquiera en funciones distintas (error semántico; antes compartían vtable).
 - Enteros de 32 bits con desbordamiento modular (el intérprete usa enteros de Python sin límite).
 - `float`: la gramática lo acepta, pero el backend solo genera aritmética entera; `compile_to_mips`
   lo rechaza con `[ERROR] Line L:C — float no soportado ...` en vez de truncar en silencio.

@@ -40,6 +40,7 @@ class SemanticAnalyzer(CompiscriptVisitor):
         self._used_labels: set[str] = set()  # etiquetas de función ya entregadas
         self._capturing_classes: set[str] = set()  # campos que usan locales envolventes
         self._pending_news: list = []  # (ctx, ClassType, dentro de un método)
+        self._declared_classes: set[str] = set()  # nombres de clase ya declarados
         # tablas para el generador de TAC
         self.node_types: dict = {}
         self.scope_of: dict = {}
@@ -455,6 +456,12 @@ class SemanticAnalyzer(CompiscriptVisitor):
                      is_initialized=True)
         if not self.symbols.define(sym):
             self._err(ctx, f"Duplicate class declaration '{name}'")
+        elif name in self._declared_classes:
+            # ponytail: el registro de clases (vtable, layout) es global por nombre; dos clases
+            # locales homónimas compartirían vtable. Registro por scope si se necesitan.
+            self._err(ctx, f"Class '{name}' is already declared elsewhere in the program "
+                           f"(class names must be unique)")
+        self._declared_classes.add(name)
         self.symbol_of[ctx] = sym
 
         ct.method_labels = {}  # método -> etiqueta real; lo lee memory_layout
