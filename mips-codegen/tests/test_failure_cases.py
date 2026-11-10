@@ -49,3 +49,21 @@ def test_runtime_failures_match_in_mars(cps: Path) -> None:
         simulator.run_asm(asm)
     expected = cps.with_suffix(".out").read_text(encoding="utf-8").strip().splitlines()[-1]
     assert expected in str(exc.value)
+
+
+def _nested(depth: int) -> str:
+    return "print(" + "(" * depth + "1" + ")" * depth + ");\n"
+
+
+@pytest.mark.parametrize("depth", [100, 2000], ids=["visitor", "parser"])
+def test_too_deep_nesting_is_a_compile_error(depth: int) -> None:
+    # Antes: RecursionError sin capturar (visitors recursivos / parser de ANTLR).
+    result = compile_to_mips(_nested(depth))
+    assert not result.ok and result.asm is None
+    assert any("demasiado anidada" in e and "Line 1:" in e for e in result.errors), result.errors
+
+
+def test_moderate_nesting_still_compiles() -> None:
+    result = compile_to_mips(_nested(8))
+    assert result.ok, result.errors
+    assert mipssim.run_asm(result.asm).stdout == "1\n"

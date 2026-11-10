@@ -40,8 +40,35 @@ class _SyntaxErrorCollector(ErrorListener):
         self.errors.append(f"[ERROR] Line {line}:{column} — {msg}")
 
 
+def _deepest_nesting(source: str) -> tuple[int, int]:
+    """Línea y columna del paréntesis/corchete/llave abierto más anidado."""
+    depth = best = 0
+    line, col, pos = 1, 0, (1, 0)
+    for ch in source:
+        if ch in "([{":
+            depth += 1
+            if depth > best:
+                best, pos = depth, (line, col)
+        elif ch in ")]}":
+            depth -= 1
+        line, col = (line + 1, 0) if ch == "\n" else (line, col + 1)
+    return pos
+
+
 def compile(source: str, source_name: str = "<input>") -> CompileResult:
     """Compila código fuente Compiscript a TAC."""
+    try:
+        return _compile(source, source_name)
+    except RecursionError:
+        # El parser de ANTLR y los visitors son recursivos. No se sube el límite de recursión:
+        # en el hilo de Streamlit arriesga un desbordamiento real de la pila de C.
+        line, col = _deepest_nesting(source)
+        return CompileResult(ok=False, errors=[
+            f"[ERROR] Line {line}:{col} — expresion demasiado anidada: "
+            "el compilador no soporta este nivel de anidamiento"])
+
+
+def _compile(source: str, source_name: str) -> CompileResult:
     input_stream = InputStream(source)
     input_stream.name = source_name
 
