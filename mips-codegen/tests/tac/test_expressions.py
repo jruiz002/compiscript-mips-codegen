@@ -64,3 +64,15 @@ def test_destination_optimization_no_extra_temp_for_direct_assignment():
     result = compile_ok("let a: integer = 1; let b: integer = 2; let x: integer = a + b;\n")
     assert "x = a + b" in result.tac_text
     assert "t0" not in result.tac_text
+
+
+def test_operands_are_evaluated_left_to_right():
+    # la variable se lee antes de la llamada que la modifica: 5 + 1 + 15
+    src = (
+        "let g: integer = 5;\n"
+        "function bump(): integer { g = g + 10; return 1; }\n"
+        "function suma(a: integer, b: integer): integer { return a * 100 + b; }\n"
+        "print(g + bump() + g);\n"
+        "print(suma(g, bump()));\n"
+    )
+    assert run_source(src) == "21\n1501\n"
