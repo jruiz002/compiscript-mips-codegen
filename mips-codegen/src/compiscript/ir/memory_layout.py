@@ -38,8 +38,10 @@ def compute_class_layouts(class_registry: Dict[str, ClassType]) -> None:
             field_offsets[attr_name] = next_offset
             next_offset += WORD_SIZE
 
+        # etiqueta real del símbolo (el analizador la desambigua si choca con otra función)
+        labels = getattr(ct, "method_labels", {})
         for method_name in ct.methods:
-            label = f"{ct.name}_{method_name}"
+            label = labels.get(method_name, f"{ct.name}_{method_name}")
             if method_name in method_slots:
                 slot = method_slots[method_name]  # override: reusa el slot del ancestro
                 vtable[slot] = label

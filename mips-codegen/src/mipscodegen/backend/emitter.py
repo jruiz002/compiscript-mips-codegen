@@ -562,7 +562,10 @@ def generate_mips(program: TACProgram, class_registry: dict, globals_size: int,
         "    .align 2",
     ]
     for name, ct in class_registry.items():
-        slots = [fn_label(m) if m in functions else "0" for m in ct.vtable] or ["0"]
+        missing = [m for m in ct.vtable if m not in functions]
+        if missing:  # un 0 en la vtable sería un salto a la dirección 0 en ejecución
+            raise ValueError(f"vtable de '{name}': no existe la función de {', '.join(missing)}")
+        slots = [fn_label(m) for m in ct.vtable] or ["0"]  # clase sin métodos: .word 0
         out.append(f"vt_{name}: .word {', '.join(slots)}")
     for label, value in program.strings.items():
         out.append(_string_directive(label, value))

@@ -37,6 +37,7 @@ class SemanticAnalyzer(CompiscriptVisitor):
         self.symbols = SymbolTable()
         self._class_registry: dict[str, ClassType] = {}
         self._in_constructor = False
+        self._used_labels: set[str] = set()  # etiquetas de función ya entregadas
         # tablas para el generador de TAC
         self.node_types: dict = {}
         self.scope_of: dict = {}
@@ -93,6 +94,41 @@ class SemanticAnalyzer(CompiscriptVisitor):
                   rhs_type.kind not in (TypeKind.ANY, TypeKind.ERROR)):
                 if not member.is_compatible_with(rhs_type):
                     self._err(ctx, f"Cannot assign '{rhs_type}' to '{attr_name}' (type '{member}')")
+
+    def _unique_label(self, label: str) -> str:
+        """Devuelve label, o label_2, label_3... si ya se usó (p. ej. clase `f` con método `x`
+        contra la función global `x`: ambas darían `f_x`)."""
+        candidate, n = label, 1
+        while candidate in self._used_labels:
+            n += 1
+            candidate = f"{label}_{n}"
+        self._used_labels.add(candidate)
+        return candidate
+
+    def _current_class_type(self) -> ClassType | None:
+        """Clase más cercana que encierra al scope actual. Va por el registro de clases y no
+        por el scope global, porque una clase puede declararse dentro de una función."""
+        for scope in reversed(self.symbols._scope_stack):
+            if scope.scope_kind == "class":
+                return self._class_registry.get(scope.name)
+        return None
+
+    def _check_method_capture(self, ctx, sym: Symbol) -> None:
+        """Un método no tiene static link: no puede usar locales, parámetros ni funciones
+        anidadas de la función donde se declaró su clase."""
+        crossed_class: str | None = None
+        for scope in reversed(self.symbols._scope_stack):
+            if scope._symbols.get(sym.name) is sym:
+                break
+            if scope.scope_kind == "class" and crossed_class is None:
+                crossed_class = scope.name
+        else:
+            return
+        if crossed_class is None:
+            return
+        if sym.storage in ("local", "param") or sym.extra.get("has_static_link"):
+            self._err(ctx, f"Class '{crossed_class}' cannot access '{sym.name}' of its enclosing "
+                           f"function (methods cannot capture locals, parameters or nested functions)")
 
     def _assign_storage(self, sym: Symbol) -> None:
         """Asigna la dirección de sym según dónde se declaró (global, local o atributo)."""
@@ -234,6 +270,7 @@ class SemanticAnalyzer(CompiscriptVisitor):
                 self.visit(expressions[0])
                 return None
             self.symbol_of[ctx] = sym
+            self._check_method_capture(ctx, sym)
             if sym.is_const:
                 self._err(ctx, f"Cannot assign to constant '{name}'")
             rhs_type = self.visit(expressions[0])
@@ -276,21 +313,26 @@ class SemanticAnalyzer(CompiscriptVisitor):
         if self.symbols.lookup_local(name):
             self._err(ctx, f"Duplicate function declaration '{name}'")
 
-        # etiqueta: f_nombre, Clase_metodo o f_externa__interna
+        # etiqueta: f_nombre, Clase_metodo o f_externa__interna. Un método siempre es
+        # Clase_metodo y sin static link, aunque su clase esté declarada dentro de una función.
         is_method = self.symbols.current_scope.scope_kind == "class"
-        enclosing_class = self.symbols.current_class_type() if is_method else None
-        enclosing_func_scope = self.symbols.current_function_scope()
-        if enclosing_func_scope is not None:
+        enclosing_class = self._current_class_type() if is_method else None
+        enclosing_func_scope = None if is_method else self.symbols.current_function_scope()
+        if enclosing_class is not None:
+            label = f"{enclosing_class.name}_{name}"
+        elif enclosing_func_scope is not None:
             outer_label = (
                 enclosing_func_scope.defining_symbol.label
                 if enclosing_func_scope.defining_symbol and enclosing_func_scope.defining_symbol.label
                 else f"f_{enclosing_func_scope.name}"
             )
             label = f"{outer_label}__{name}"
-        elif enclosing_class is not None:
-            label = f"{enclosing_class.name}_{name}"
         else:
             label = f"f_{name}"
+        label = self._unique_label(label)
+        if enclosing_class is not None:
+            # memory_layout arma la vtable con esta etiqueta
+            enclosing_class.method_labels[name] = label
 
         # las funciones anidadas necesitan static link
         has_static_link = enclosing_func_scope is not None
@@ -391,6 +433,7 @@ class SemanticAnalyzer(CompiscriptVisitor):
             self._err(ctx, f"Duplicate class declaration '{name}'")
         self.symbol_of[ctx] = sym
 
+        ct.method_labels = {}  # método -> etiqueta real; lo lee memory_layout
         class_scope = self.symbols.enter_scope(name=name, kind="class")
         self.scope_of[ctx] = class_scope
 
@@ -885,6 +928,7 @@ class SemanticAnalyzer(CompiscriptVisitor):
             self._err(ctx, f"Use of undeclared identifier '{name}'")
             return ERROR_TYPE
         self.symbol_of[ctx] = sym
+        self._check_method_capture(ctx, sym)
         return sym.data_type
 
     def visitNewExpr(self, ctx: CompiscriptParser.NewExprContext):
@@ -918,5 +962,5 @@ class SemanticAnalyzer(CompiscriptVisitor):
         sym = self.symbols.lookup("this")
         if sym is not None:
             self.symbol_of[ctx] = sym
-        ct = self.symbols.current_class_type()
+        ct = self._current_class_type()
         return ct if ct else ANY
