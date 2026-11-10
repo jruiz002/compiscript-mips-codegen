@@ -21,11 +21,22 @@ def test_compile_errors_are_reported_without_asm() -> None:
     assert not result.ok and result.errors and result.asm is None
 
 
-def test_uncaught_exception_is_reflected_in_exit_code() -> None:
+@pytest.mark.parametrize("engine", service.available_engines())
+def test_uncaught_exception_is_reflected_in_exit_code(engine: str) -> None:
     result = service.compile_source("let v: integer[] = [1];\nprint(v[3]);\n")
-    outcome = service.execute(result.asm)
-    assert outcome.exit_code == 1 and not outcome.ok
+    outcome = service.execute(result.asm, engine)
+    assert outcome.exit_code == 1 and not outcome.ok and outcome.error is None
     assert "indice fuera de rango" in outcome.stdout
+
+
+def test_mars_timeout_is_returned_not_raised(monkeypatch: pytest.MonkeyPatch) -> None:
+    if service.ENGINE_MARS not in service.available_engines():
+        pytest.skip("Java/MARS no disponible")
+    real_run = service.simulator.run
+    monkeypatch.setattr(service.simulator, "run", lambda asm: real_run(asm, timeout=2))
+    asm = service.compile_source("while (true) { }\n").asm
+    outcome = service.execute(asm, service.ENGINE_MARS)
+    assert outcome.error and "no termino" in outcome.error
 
 
 def test_broken_asm_returns_error_instead_of_raising() -> None:

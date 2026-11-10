@@ -534,14 +534,18 @@ def _string_directive(label: str, value: str) -> str:
     if all(32 <= b < 127 for b in data):
         escaped = value.replace("\\", "\\\\").replace('"', '\\"')
         return f'{label}: .asciiz "{escaped}"'
-    return f"{label}: .byte {', '.join(str(b) for b in data)}, 0"
+    # MARS solo acepta .byte en [-128, 127]: los bytes UTF-8 >= 128 van como su valor con signo.
+    return f"{label}: .byte {', '.join(str(b - 256 if b > 127 else b) for b in data)}, 0"
 
 
 def generate_mips(program: TACProgram, class_registry: dict, globals_size: int,
                   regalloc: bool = True, comments: bool = True) -> str:
     functions = {f.name: f for f in program.functions}
-    enclosing = {f.name.rsplit("__", 1)[0] for f in program.functions
-                 if f.has_static_link and "__" in f.name}
+    # Una anidada se llama `<padre>__<hija>`; no usar rsplit("__"): la hija puede llamarse
+    # `_x` o `a__b`. Un falso positivo solo desactiva la promoción a $s (conservador).
+    nested = [f.name for f in program.functions if f.has_static_link]
+    enclosing = {f.name for f in program.functions
+                 if any(n.startswith(f.name + "__") for n in nested)}
     ctx = _ProgramContext(program, functions, enclosing, regalloc, comments)
 
     text: list[str] = []

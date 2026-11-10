@@ -15,11 +15,20 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--out", type=Path, help="archivo .s de salida (por defecto, stdout)")
     parser.add_argument("--run", action="store_true", help="ejecutar el resultado en el simulador interno")
     parser.add_argument("--no-regalloc", action="store_true",
-                        help="todo por memoria/pila, sin promover variables a $s (línea base)")
+                        help="no promover variables a $s (los $t siguen en uso dentro de cada bloque)")
     parser.add_argument("--no-comments", action="store_true", help="sin el TAC como comentario")
+    # Windows: la consola/redirección usa cp1252 por defecto y truena con "π", "—", tildes.
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8", errors="replace")
     args = parser.parse_args(argv)
 
-    result = compile_to_mips(args.source.read_text(encoding="utf-8"), str(args.source),
+    try:
+        source = args.source.read_text(encoding="utf-8")
+    except OSError as exc:
+        print(f"[ERROR] no se pudo leer '{args.source}': {exc.strerror}", file=sys.stderr)
+        return 1
+    result = compile_to_mips(source, str(args.source),
                              regalloc=not args.no_regalloc, comments=not args.no_comments)
     for line in result.warnings:
         print(line, file=sys.stderr)
@@ -29,7 +38,11 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     if args.out:
-        args.out.write_text(result.asm or "", encoding="utf-8")
+        try:
+            args.out.write_text(result.asm or "", encoding="utf-8")
+        except OSError as exc:
+            print(f"[ERROR] no se pudo escribir '{args.out}': {exc.strerror}", file=sys.stderr)
+            return 1
     if args.run:
         try:
             run = mipssim.run_asm(result.asm)

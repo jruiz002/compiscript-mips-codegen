@@ -55,8 +55,9 @@ Thumbs.db
 # Simulador MIPS descargado localmente (MARS/SPIM): binario de terceros, no se versiona.
 mips-codegen/tools/mars/
 mips-codegen/tools/*.jar
-# Salidas locales del compilador. Los .s esperados viven en tests/cases/ y SÍ se versionan.
+# Salidas locales del compilador (--out x.s). No hay .s esperados versionados: los tests comparan stdout.
 mips-codegen/out/
+mips-codegen/*.s
 mips-codegen/**/*.s.out
 mips-codegen/**/*.asm.out
 

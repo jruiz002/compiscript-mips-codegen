@@ -62,7 +62,7 @@ def _render_run(result: service.MipsResult, engines: list[str]) -> None:
     if st.button("Ejecutar", icon="▶️"):
         st.session_state["outcome"] = service.execute(result.asm, engine)
     outcome = st.session_state.get("outcome")
-    if outcome is None:
+    if outcome is None or outcome.engine != engine:  # no mostrar la corrida del otro motor
         st.caption("Presiona **Ejecutar** para correr el MIPS generado.")
         return
     if outcome.error:
@@ -111,9 +111,11 @@ def main() -> None:
         st.header("Opciones")
         choice = st.selectbox("Cargar ejemplo", ["(codigo actual)", *examples])
         regalloc = st.toggle("Asignacion de registros ($s)", value=True,
-                             help="Desactivado: todo por memoria (linea base).")
+                             help="Desactivado: las variables viven en el frame; getReg ($t) sigue activo.")
         comments = st.toggle("Anotar el asm con el TAC", value=True)
-        if choice != "(codigo actual)" and st.session_state.get("loaded") != choice:
+        if choice == "(codigo actual)":
+            st.session_state.pop("loaded", None)  # volver a elegir el mismo ejemplo lo recarga
+        elif st.session_state.get("loaded") != choice:
             st.session_state["source"] = examples[choice]
             st.session_state["loaded"] = choice
             st.session_state["editor_version"] = st.session_state.get("editor_version", 0) + 1
