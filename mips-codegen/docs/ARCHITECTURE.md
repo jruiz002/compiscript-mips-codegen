@@ -120,6 +120,23 @@ un `return` dentro de un `try` no deja un handler colgando.
    posterior volvía a saltar al `catch` de un `try` ya terminado y, si el mismo `try` se re-ejecutaba
    (`continue`), su registro quedaba enlazado consigo mismo y `rt_throw` ciclaba para siempre.
    Test: `tests/cases/success/break_continue_en_try.cps`.
+6. **Orden de evaluación de izquierda a derecha** (`_pin` en `tac_generator.py`): una variable
+   simple se copia a un temporal si un operando posterior puede modificarla (llamada, `new` o
+   asignación). Antes `g + bump() + g` leía el `g` ya modificado en ambos lados. Aplica a operadores
+   binarios, comparaciones, argumentos, receptor de un método, base de un índice y `switch`. Si no
+   hay efectos posteriores el TAC no cambia. Test: `tests/cases/success/orden_evaluacion.cps`.
+7. **Etiquetas de función únicas y clases locales** (`semantic_analyzer.py`, `memory_layout.py`):
+   una etiqueta repetida recibe sufijo `_2`, `_3`… (la clase `f` con método `x` chocaba con la
+   función global `x`: ambas `f_x`). Un método siempre es `Clase_metodo` sin static link, aunque su
+   clase se declare dentro de una función (antes su vtable quedaba en `0`); si un método usa una
+   local de esa función es un error semántico. Un inicializador de campo sí puede usarla (se genera
+   en cada `new`), salvo que ese `new` esté dentro de un método. La vtable toma la etiqueta real del símbolo y el backend falla si
+   a un slot le falta su función. Tests: `etiquetas_colision.cps`, `clase_local.cps`,
+   `clase_local_inicializador.cps`,
+   `failure/clase_local_captura.cps`, `failure/clase_local_new_en_metodo.cps`.
+8. **Anidamiento excesivo** (`pipeline.py`): un `RecursionError` del parser o de los visitors
+   (desde ≈22 niveles de paréntesis) se reporta como `[ERROR] Line L:C — expresion demasiado
+   anidada ...` en vez de un traceback.
 
 La copia omite además `compiscript/ide/` y `compiscript/main.py` de la Fase 2 (el IDE y el CLI de
 esta fase están en `mipscodegen/`).
@@ -135,15 +152,20 @@ esta fase están en `mipscodegen/`).
   el simulador interno aborta (código 2).
 - Acceder a un campo de un objeto `null` no se verifica: MARS reporta *address out of range*; el
   simulador interno lee `0`.
-- Orden de evaluación (heredado de la Fase 2): una variable simple a la izquierda de una llamada
-  se lee después de la llamada (`g + f() + g`, si `f` modifica `g`, usa el `g` nuevo en ambos lados).
+- Orden de evaluación en asignaciones a índice o campo: en `a[i] = f()` el lado derecho se evalúa
+  antes que `a` e `i` (TypeScript evalúa primero el destino). El resto va de izquierda a derecha
+  (cambio 6 de §5).
+- Un método de una clase declarada dentro de una función no puede usar las locales de esa función
+  (error semántico; cambio 7 de §5). Los inicializadores de campo sí, salvo un `new` dentro de un método.
+- El registro de clases es global por nombre, así que un nombre de clase no puede repetirse en el
+  programa, ni siquiera en funciones distintas (error semántico; antes compartían vtable).
 - Enteros de 32 bits con desbordamiento modular (el intérprete usa enteros de Python sin límite).
 - `float`: la gramática lo acepta, pero el backend solo genera aritmética entera; `compile_to_mips`
   lo rechaza con `[ERROR] Line L:C — float no soportado ...` en vez de truncar en silencio.
 
 ## 7. Validación
 
-`pytest -q` (≈500 tests con MARS instalado; ≈400 sin él): incluye los 86 del TAC (`tests/tac/`, 82 heredados de la Fase 2);
+`pytest -q` (≈500 tests con MARS instalado; ≈400 sin él): incluye los 87 del TAC (`tests/tac/`, 82 heredados de la Fase 2);
 unitarios de `getReg()` y del frame; 20+ programas ejecutados en MIPS y comparados con (a) el
 intérprete del TAC y (b) valores calculados a mano, cada uno con y sin asignación de registros;
 corpus de errores de compilación y de ejecución (`tests/cases/failure`, `runtime_failure`); y los

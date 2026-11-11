@@ -60,6 +60,7 @@ class TACGenerator:
         self._function_stack: list = []
         self._ar_chain: List[ActivationRecord] = []
         self._class_ctx: dict = {}
+        self._ars_with_nested: set = set()
 
     # ------------------------------------------------------------------
     # Entrada
@@ -95,6 +96,33 @@ class TACGenerator:
         self._emit(OpCode.ASSIGN, value, None, dest)
         self.temps.release(value)
         return dest
+
+    def _contains(self, ctx, kinds) -> bool:
+        """True si el subárbol tiene algún nodo de los tipos dados."""
+        if isinstance(ctx, kinds):
+            return True
+        return any(self._contains(child, kinds) for child in (ctx.getChildren()
+                                                              if ctx.getChildCount() else ()))
+
+    def _pin(self, operand: Operand, later_ctxs) -> Operand:
+        """Copia una variable a un temporal si algún operando posterior puede modificarla, para
+        respetar el orden de evaluación de izquierda a derecha (ej. g + bump() + g)."""
+        if not isinstance(operand, VarRef):
+            return operand
+        P = CompiscriptParser
+        kinds = (P.AssignExprContext, P.PropertyAssignExprContext)
+        # a un local solo lo cambia una llamada si la función tiene funciones anidadas
+        if (operand.symbol.storage not in ("local", "param")
+                or id(self._ar_chain[-1]) in self._ars_with_nested):
+            kinds += (P.CallExprContext, P.NewExprContext)
+        if any(self._contains(c, kinds) for c in later_ctxs):
+            t = self.temps.new_temp()
+            self._emit(OpCode.ASSIGN, operand, None, t)
+            return t
+        return operand
+
+    def _gen_args(self, arg_exprs) -> list:
+        return [self._pin(self._gen_expr(e), arg_exprs[i + 1:]) for i, e in enumerate(arg_exprs)]
 
     def _static_link_depth(self, symbol: Symbol) -> int:
         for depth, ar in enumerate(reversed(self._ar_chain)):
@@ -207,7 +235,7 @@ class TACGenerator:
             else:
                 self._gen_expr(expressions[0], dest=VarRef(sym))
         else:
-            obj = self._gen_expr(expressions[0])
+            obj = self._pin(self._gen_expr(expressions[0]), expressions[1:])
             obj_type = self.types.get(expressions[0])
             value = self._gen_expr(expressions[1])
             attr = identifier.getText()
@@ -367,9 +395,9 @@ class TACGenerator:
         self._emit(OpCode.LABEL, None, None, Label(l_end))
 
     def _gen_switch(self, ctx: CompiscriptParser.SwitchStatementContext) -> None:
-        value = self._gen_expr(ctx.expression())
-        l_end = self.labels.new_label()
         cases = ctx.switchCase()
+        value = self._pin(self._gen_expr(ctx.expression()), [c.expression() for c in cases])
+        l_end = self.labels.new_label()
         case_labels = [self.labels.new_label() for _ in cases]
         l_default = self.labels.new_label() if ctx.defaultCase() else l_end
 
@@ -410,6 +438,8 @@ class TACGenerator:
         self.current_function = tac_func
         self.temps = TempAllocator()
         self._ar_chain = self._ar_chain + [ar]
+        if self._contains(ctx.block(), CompiscriptParser.FunctionDeclarationContext):
+            self._ars_with_nested.add(id(ar))
 
         for stmt in ctx.block().statement():
             self._gen_statement(stmt)
@@ -477,7 +507,7 @@ class TACGenerator:
                if hasattr(t, "getText") and t.getText() in op_symbols]
         if not ops:
             return self._gen_expr(operand_ctxs[0], dest)
-        result = self._gen_expr(operand_ctxs[0])
+        result = self._pin(self._gen_expr(operand_ctxs[0]), operand_ctxs[1:])
         last = len(ops) - 1
         for i, (op_text, operand_ctx) in enumerate(zip(ops, operand_ctxs[1:])):
             right = self._gen_expr(operand_ctx)
@@ -494,7 +524,7 @@ class TACGenerator:
                if hasattr(t, "getText") and t.getText() in ("+", "-")]
         if not ops:
             return self._gen_expr(operand_ctxs[0], dest)
-        result = self._gen_expr(operand_ctxs[0])
+        result = self._pin(self._gen_expr(operand_ctxs[0]), operand_ctxs[1:])
         result_type = self.types.get(operand_ctxs[0])
         last = len(ops) - 1
         for i, (op_text, operand_ctx) in enumerate(zip(ops, operand_ctxs[1:])):
@@ -652,7 +682,7 @@ class TACGenerator:
         return self._leaf(written, dest)
 
     def _gen_property_assign_expr(self, ctx: CompiscriptParser.PropertyAssignExprContext, dest) -> Operand:
-        obj = self._gen_expr(ctx.lhs)
+        obj = self._pin(self._gen_expr(ctx.lhs), [ctx.assignmentExpr()])
         obj_type = self.types.get(ctx.lhs)
         value = self._gen_expr(ctx.assignmentExpr())
         attr = ctx.Identifier().getText()
@@ -669,6 +699,7 @@ class TACGenerator:
             current, current_type = self._gen_suffix_read(suffix, current, current_type, None)
         last = suffixes[-1]
         if isinstance(last, CompiscriptParser.IndexExprContext):
+            current = self._pin(current, [last.expression()])
             index = self._gen_expr(last.expression())
             self._emit(OpCode.BOUNDS, current, index, None, comment="boundscheck")
             offset_t = self.temps.new_temp()
@@ -734,15 +765,18 @@ class TACGenerator:
 
     def _gen_suffix_read(self, suffix, base, base_type, dest):
         if isinstance(suffix, CompiscriptParser.IndexExprContext):
+            pinned = self._pin(base, [suffix.expression()])
             index = self._gen_expr(suffix.expression())
-            self._emit(OpCode.BOUNDS, base, index, None, comment="boundscheck")
+            self._emit(OpCode.BOUNDS, pinned, index, None, comment="boundscheck")
             offset_t = self.temps.new_temp()
             self._emit(OpCode.MUL, index, Const(WORD_SIZE), offset_t)
             self.temps.release(index)
             self._emit(OpCode.ADD, offset_t, Const(ARRAY_HEADER_SIZE), offset_t)
             result = dest if dest is not None else self.temps.new_temp()
-            self._emit(OpCode.LOAD, base, offset_t, result)
+            self._emit(OpCode.LOAD, pinned, offset_t, result)
             self.temps.release(offset_t)
+            if pinned is not base:
+                self.temps.release(pinned)
             return result, self.types.get(suffix)
         if isinstance(suffix, CompiscriptParser.PropertyAccessExprContext):
             attr = suffix.Identifier().getText()
@@ -778,7 +812,7 @@ class TACGenerator:
         if ctor_label:
             args_ctx = ctx.arguments()
             arg_exprs = list(args_ctx.expression()) if args_ctx else []
-            arg_operands = [self._gen_expr(e) for e in arg_exprs]
+            arg_operands = self._gen_args(arg_exprs)
             self._emit(OpCode.PARAM, obj)
             for a in arg_operands:
                 self._emit(OpCode.PARAM, a)
@@ -814,7 +848,7 @@ class TACGenerator:
     def _gen_static_call(self, sym: Symbol, call_suffix, dest) -> Operand:
         args_ctx = call_suffix.arguments()
         arg_exprs = list(args_ctx.expression()) if args_ctx else []
-        arg_operands = [self._gen_expr(e) for e in arg_exprs]
+        arg_operands = self._gen_args(arg_exprs)
         needs_link = bool(sym.extra.get("has_static_link"))
         n = len(arg_operands) + (1 if needs_link else 0)
         link = None
@@ -837,7 +871,9 @@ class TACGenerator:
                           call_suffix, dest) -> Operand:
         args_ctx = call_suffix.arguments()
         arg_exprs = list(args_ctx.expression()) if args_ctx else []
-        arg_operands = [self._gen_expr(e) for e in arg_exprs]
+        receiver = obj
+        obj = self._pin(obj, arg_exprs)
+        arg_operands = self._gen_args(arg_exprs)
         self._emit(OpCode.PARAM, obj)
         for a in arg_operands:
             self._emit(OpCode.PARAM, a)
@@ -851,6 +887,8 @@ class TACGenerator:
         if ret_type is None or ret_type.kind != TypeKind.VOID:
             result = dest if dest is not None else self.temps.new_temp()
         self._emit(OpCode.VCALL, obj, Const(slot), result, comment=f".{method_name} n={n}")
+        if obj is not receiver:
+            self.temps.release(obj)
         return result if result is not None else Const(0)
 
     # --- Condiciones con cortocircuito ---
@@ -929,7 +967,7 @@ class TACGenerator:
         operands = ctx.additiveExpr()
         op_text = next(t.getText() for t in ctx.getChildren()
                         if hasattr(t, "getText") and t.getText() in _REL_JUMPS)
-        left = self._gen_expr(operands[0])
+        left = self._pin(self._gen_expr(operands[0]), operands[1:])
         right = self._gen_expr(operands[1])
         self.temps.release(left)
         self.temps.release(right)
@@ -939,7 +977,7 @@ class TACGenerator:
         operands = ctx.relationalExpr()
         op_text = next(t.getText() for t in ctx.getChildren()
                         if hasattr(t, "getText") and t.getText() in _EQ_JUMPS)
-        left = self._gen_expr(operands[0])
+        left = self._pin(self._gen_expr(operands[0]), operands[1:])
         right = self._gen_expr(operands[1])
         self.temps.release(left)
         self.temps.release(right)

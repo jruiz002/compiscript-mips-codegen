@@ -37,6 +37,10 @@ class SemanticAnalyzer(CompiscriptVisitor):
         self.symbols = SymbolTable()
         self._class_registry: dict[str, ClassType] = {}
         self._in_constructor = False
+        self._used_labels: set[str] = set()  # etiquetas de función ya entregadas
+        self._capturing_classes: set[str] = set()  # campos que usan locales envolventes
+        self._pending_news: list = []  # (ctx, ClassType, dentro de un método)
+        self._declared_classes: set[str] = set()  # nombres de clase ya declarados
         # tablas para el generador de TAC
         self.node_types: dict = {}
         self.scope_of: dict = {}
@@ -94,6 +98,62 @@ class SemanticAnalyzer(CompiscriptVisitor):
                 if not member.is_compatible_with(rhs_type):
                     self._err(ctx, f"Cannot assign '{rhs_type}' to '{attr_name}' (type '{member}')")
 
+    def _unique_label(self, label: str) -> str:
+        """Devuelve label, o label_2, label_3... si ya se usó (p. ej. clase `f` con método `x`
+        contra la función global `x`: ambas darían `f_x`)."""
+        candidate, n = label, 1
+        while candidate in self._used_labels:
+            n += 1
+            candidate = f"{label}_{n}"
+        self._used_labels.add(candidate)
+        return candidate
+
+    def _current_class_type(self) -> ClassType | None:
+        """Clase más cercana que encierra al scope actual. Va por el registro de clases y no
+        por el scope global, porque una clase puede declararse dentro de una función."""
+        for scope in reversed(self.symbols._scope_stack):
+            if scope.scope_kind == "class":
+                return self._class_registry.get(scope.name)
+        return None
+
+    @staticmethod
+    def _is_method_scope(scope) -> bool:
+        return scope.scope_kind == "function" and scope.parent is not None             and scope.parent.scope_kind == "class"
+
+    def _check_method_capture(self, ctx, sym: Symbol) -> None:
+        """Un método no tiene static link: no puede usar locales, parámetros ni funciones
+        anidadas de la función donde se declaró su clase. Un inicializador de campo sí puede:
+        se genera en el `new`, dentro de esa función (ver `_check_new_in_method`)."""
+        if not (sym.storage in ("local", "param") or sym.extra.get("has_static_link")):
+            return
+        method_class: str | None = None
+        field_class: str | None = None
+        for scope in reversed(self.symbols._scope_stack):
+            if scope._symbols.get(sym.name) is sym:
+                break
+            if self._is_method_scope(scope) and method_class is None:
+                method_class = scope.parent.name
+            elif scope.scope_kind == "class" and method_class is None and field_class is None:
+                field_class = scope.name
+        else:
+            return
+        if method_class is not None:
+            self._err(ctx, f"Class '{method_class}' cannot access '{sym.name}' of its enclosing "
+                           f"function (methods cannot capture locals, parameters or nested functions)")
+        elif field_class is not None:
+            self._capturing_classes.add(field_class)
+
+    def _check_new_in_method(self) -> None:
+        """Los inicializadores de campo que usan locales de la función envolvente se generan en
+        cada `new`; dentro de un método (sin static link) esas locales no son alcanzables."""
+        for ctx, ct, in_method in self._pending_news:
+            c = ct
+            while c is not None and c.name not in self._capturing_classes:
+                c = c.superclass
+            if c is not None and in_method:
+                self._err(ctx, f"Cannot create '{ct.name}' inside a method: the field initializers "
+                               f"of '{c.name}' use locals of its enclosing function")
+
     def _assign_storage(self, sym: Symbol) -> None:
         """Asigna la dirección de sym según dónde se declaró (global, local o atributo)."""
         scope = self.symbols.current_scope
@@ -119,6 +179,7 @@ class SemanticAnalyzer(CompiscriptVisitor):
                 self._pre_register_class(cd)
         # Second pass: full visit
         self.visitChildren(ctx)
+        self._check_new_in_method()
         return None
 
     def _pre_register_class(self, ctx: CompiscriptParser.ClassDeclarationContext):
@@ -234,6 +295,7 @@ class SemanticAnalyzer(CompiscriptVisitor):
                 self.visit(expressions[0])
                 return None
             self.symbol_of[ctx] = sym
+            self._check_method_capture(ctx, sym)
             if sym.is_const:
                 self._err(ctx, f"Cannot assign to constant '{name}'")
             rhs_type = self.visit(expressions[0])
@@ -276,21 +338,26 @@ class SemanticAnalyzer(CompiscriptVisitor):
         if self.symbols.lookup_local(name):
             self._err(ctx, f"Duplicate function declaration '{name}'")
 
-        # etiqueta: f_nombre, Clase_metodo o f_externa__interna
+        # etiqueta: f_nombre, Clase_metodo o f_externa__interna. Un método siempre es
+        # Clase_metodo y sin static link, aunque su clase esté declarada dentro de una función.
         is_method = self.symbols.current_scope.scope_kind == "class"
-        enclosing_class = self.symbols.current_class_type() if is_method else None
-        enclosing_func_scope = self.symbols.current_function_scope()
-        if enclosing_func_scope is not None:
+        enclosing_class = self._current_class_type() if is_method else None
+        enclosing_func_scope = None if is_method else self.symbols.current_function_scope()
+        if enclosing_class is not None:
+            label = f"{enclosing_class.name}_{name}"
+        elif enclosing_func_scope is not None:
             outer_label = (
                 enclosing_func_scope.defining_symbol.label
                 if enclosing_func_scope.defining_symbol and enclosing_func_scope.defining_symbol.label
                 else f"f_{enclosing_func_scope.name}"
             )
             label = f"{outer_label}__{name}"
-        elif enclosing_class is not None:
-            label = f"{enclosing_class.name}_{name}"
         else:
             label = f"f_{name}"
+        label = self._unique_label(label)
+        if enclosing_class is not None:
+            # memory_layout arma la vtable con esta etiqueta
+            enclosing_class.method_labels[name] = label
 
         # las funciones anidadas necesitan static link
         has_static_link = enclosing_func_scope is not None
@@ -389,8 +456,15 @@ class SemanticAnalyzer(CompiscriptVisitor):
                      is_initialized=True)
         if not self.symbols.define(sym):
             self._err(ctx, f"Duplicate class declaration '{name}'")
+        elif name in self._declared_classes:
+            # ponytail: el registro de clases (vtable, layout) es global por nombre; dos clases
+            # locales homónimas compartirían vtable. Registro por scope si se necesitan.
+            self._err(ctx, f"Class '{name}' is already declared elsewhere in the program "
+                           f"(class names must be unique)")
+        self._declared_classes.add(name)
         self.symbol_of[ctx] = sym
 
+        ct.method_labels = {}  # método -> etiqueta real; lo lee memory_layout
         class_scope = self.symbols.enter_scope(name=name, kind="class")
         self.scope_of[ctx] = class_scope
 
@@ -885,6 +959,7 @@ class SemanticAnalyzer(CompiscriptVisitor):
             self._err(ctx, f"Use of undeclared identifier '{name}'")
             return ERROR_TYPE
         self.symbol_of[ctx] = sym
+        self._check_method_capture(ctx, sym)
         return sym.data_type
 
     def visitNewExpr(self, ctx: CompiscriptParser.NewExprContext):
@@ -893,6 +968,12 @@ class SemanticAnalyzer(CompiscriptVisitor):
             self._err(ctx, f"Unknown class '{class_name}'")
             return ERROR_TYPE
         ct = self._class_registry[class_name]
+        # solo cuentan los métodos por debajo del scope donde se declaró la clase
+        stack = self.symbols._scope_stack
+        decl = next((i for i in range(len(stack) - 1, -1, -1)
+                     if class_name in stack[i]._symbols), 0)
+        self._pending_news.append(
+            (ctx, ct, any(self._is_method_scope(sc) for sc in stack[decl + 1:])))
         args = ctx.arguments()
         arg_types = [self.visit(e) for e in args.expression()] if args else []
         constructor = ct.resolve_member("constructor")  # hereda el de la superclase si no hay propio
@@ -918,5 +999,5 @@ class SemanticAnalyzer(CompiscriptVisitor):
         sym = self.symbols.lookup("this")
         if sym is not None:
             self.symbol_of[ctx] = sym
-        ct = self.symbols.current_class_type()
+        ct = self._current_class_type()
         return ct if ct else ANY
